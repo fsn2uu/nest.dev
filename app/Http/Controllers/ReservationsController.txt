@@ -1,0 +1,173 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Reservation;
+use App\Traveler;
+use App\Fee;
+use App\RateTable;
+
+class ReservationsController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index()
+    {
+        $reservations = Reservation::mine()->get();
+
+        return view('reservations.index')
+            ->withReservations($reservations);
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function create()
+    {
+        return view('reservations.create');
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function store(Request $request)
+    {
+        $reservation = new Reservation;
+
+        $reservation->company_id = \Auth::user()->company->id;
+        $reservation->unit_id = $request->unit_id;
+
+        //Create or pull the traveler
+        if($request->traveler_id != '')
+        {
+            $traveler = Traveler::where('id', $request->traveler_id)->firstOrFail();
+        }
+        elseif(Traveler::where('email', $request->email)->count() > 0)
+        {
+            $traveler = Traveler::where('email', $request->email)->firstOrFail();
+            $traveler->first = $request->first;
+            $traveler->last = $request->last;
+            $traveler->email = $request->email;
+            $traveler->phone = $request->phone;
+            $traveler->phone2 = $request->phone2;
+            $traveler->address = $request->address;
+            $traveler->address2 = $request->address2;
+            $traveler->city = $request->city;
+            $traveler->state = $request->state;
+            $traveler->zip = $request->zip;
+            $traveler->save();
+        }
+        else
+        {
+            $traveler = new Traveler;
+            $traveler->first = $request->first;
+            $traveler->last = $request->last;
+            $traveler->email = $request->email;
+            $traveler->phone = $request->phone;
+            $traveler->phone2 = $request->phone2;
+            $traveler->address = $request->address;
+            $traveler->address2 = $request->address2;
+            $traveler->city = $request->city;
+            $traveler->state = $request->state;
+            $traveler->zip = $request->zip;
+            $traveler->save();
+        }
+
+        $reservation->traveler_id = $traveler->id;
+
+        //Get the unit
+        $unit = Unit::mine()->where('id', $request->unit_id)->firstOrFail();
+
+        //get a Stripe token if the payment == 'payment-card'
+        if($request->payment == 'payment-card')
+        {
+            \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
+
+            $token = \Stripe\Token::create([
+                'card' => [
+                    'number' => trim(str_replace(' ', '', $request->card)),
+                    'exp_month' => $request->exp_mo,
+                    'exp_year' => $request->exp_yr,
+                    'cvc' => $request->cvv,
+                ]
+            ]);
+
+            $stripe_percent = env('STRIPE_FEE_PERCENT');
+            $stripe_flat = env('STRIPE_FEE_FLAT');
+
+            //calculate the chargeout, if there isn't an override (need to add an override input to the form)
+
+            $chargeout = \Stripe\Charge::create([
+                "amount"    => '',
+                "currency"    => "usd",
+                'source'    => $token['ID'],
+                "on_behalf_of" => \Auth::user()->company->stripe_account_id,
+            ]);
+        }
+
+        //Create the reservation
+        $reservation->save();
+
+        //Send the necessary emails & notifications
+
+        //do the redirecty stuff
+        return redirect()->route('reservations');
+    }
+
+    /**
+     * Display the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        $reservation = Reservation::mine()->where('id', $id)->firstOrFail();
+
+        return view('reservations.show')
+            ->withReservation($reservation);
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function edit($id)
+    {
+        return view('reservations.edit');
+    }
+
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function update(Request $request, $id)
+    {
+        //
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function destroy($id)
+    {
+        //
+    }
+}
